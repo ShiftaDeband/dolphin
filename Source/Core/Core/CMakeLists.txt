@@ -694,6 +694,7 @@ if(WIN32)
   target_sources(core PRIVATE
     HW/EXI/BBA/TAP_Win32.cpp
     HW/EXI/BBA/TAP_Win32.h
+    HW/EXI/BBA/TAPServer.cpp
     HW/EXI/BBA/XLINK_KAI_BBA.cpp
     HW/EXI/BBA/BuiltIn.cpp
     HW/EXI/BBA/BuiltIn.h
@@ -710,7 +711,7 @@ if(WIN32)
 elseif(APPLE)
   target_sources(core PRIVATE
     HW/EXI/BBA/TAP_Apple.cpp
-    HW/EXI/BBA/TAPServer_Apple.cpp
+    HW/EXI/BBA/TAPServer.cpp
     HW/EXI/BBA/XLINK_KAI_BBA.cpp
     HW/EXI/BBA/BuiltIn.cpp
     HW/EXI/BBA/BuiltIn.h
@@ -719,6 +720,7 @@ elseif(APPLE)
 elseif(UNIX)
   target_sources(core PRIVATE
     HW/EXI/BBA/TAP_Unix.cpp
+    HW/EXI/BBA/TAPServer.cpp
     HW/EXI/BBA/XLINK_KAI_BBA.cpp
     HW/EXI/BBA/BuiltIn.cpp
     HW/EXI/BBA/BuiltIn.h
