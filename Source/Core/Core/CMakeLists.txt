@@ -191,6 +191,7 @@ add_library(core
   HW/EXI/BBA/XLINK_KAI_BBA.cpp
   HW/EXI/BBA/BuiltIn.cpp
   HW/EXI/BBA/BuiltIn.h
+  HW/EXI/Modem/TAPServer.cpp
   HW/EXI/EXI_Channel.cpp
   HW/EXI/EXI_Channel.h
   HW/EXI/EXI_Device.cpp
@@ -211,6 +212,8 @@ add_library(core
   HW/EXI/EXI_DeviceMemoryCard.h
   HW/EXI/EXI_DeviceMic.cpp
   HW/EXI/EXI_DeviceMic.h
+  HW/EXI/EXI_DeviceModem.cpp
+  HW/EXI/EXI_DeviceModem.h
   HW/EXI/EXI.cpp
   HW/EXI/EXI.h
   HW/GBAPad.cpp
