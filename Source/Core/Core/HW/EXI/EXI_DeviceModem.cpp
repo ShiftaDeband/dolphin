@@ -210,7 +210,7 @@ void CEXIModem::HandleReadModemTransfer(void* data, u32 size)
   {  // AT command buffer
     memcpy(data, m_at_reply_data.data(), std::min<size_t>(size, m_at_reply_data.size()));
     m_at_reply_data = m_at_reply_data.substr(size);
-    m_regs[Register::AT_REPLY_SIZE] = m_at_reply_data.size();
+    m_regs[Register::AT_REPLY_SIZE] = int(m_at_reply_data.size());
     SetInterruptFlag(Interrupt::AT_REPLY_DATA_AVAILABLE, !m_at_reply_data.empty(), true);
   }
   else if ((m_transfer_descriptor & 0x0F000000) == 0x08000000)
@@ -247,7 +247,7 @@ void CEXIModem::HandleWriteModemTransfer(const void* data, u32 size)
   {  // AT command buffer
     m_at_command_data.append(reinterpret_cast<const char*>(data), size);
     RunAllPendingATCommands();
-    m_regs[Register::AT_COMMAND_SIZE] = m_at_command_data.size();
+    m_regs[Register::AT_COMMAND_SIZE] = int(m_at_command_data.size());
   }
   else if ((m_transfer_descriptor & 0x0F000000) == 0x08000000)
   {  // Packet send buffer
@@ -306,7 +306,7 @@ void CEXIModem::SetInterruptFlag(uint8_t what, bool enabled, bool from_cpu)
 void CEXIModem::OnReceiveBufferSizeChangedLocked(bool from_cpu)
 {
   // The caller is expected to hold m_receive_buffer_lock when calling this.
-  uint16_t bytes_available = std::min<size_t>(m_receive_buffer.size(), 0x200);
+  uint16_t bytes_available = uint16_t(std::min<size_t>(m_receive_buffer.size(), 0x200));
   m_regs[Register::BYTES_AVAILABLE_HIGH] = (bytes_available >> 8) & 0xFF;
   m_regs[Register::BYTES_AVAILABLE_LOW] = bytes_available & 0xFF;
   SetInterruptFlag(Interrupt::RECEIVE_BUFFER_ABOVE_THRESHOLD,
@@ -343,7 +343,7 @@ void CEXIModem::AddToReceiveBuffer(std::string&& data)
 void CEXIModem::AddATReply(const std::string& data)
 {
   m_at_reply_data += data;
-  m_regs[Register::AT_REPLY_SIZE] = m_at_reply_data.size();
+  m_regs[Register::AT_REPLY_SIZE] = int(m_at_reply_data.size());
   SetInterruptFlag(Interrupt::AT_REPLY_DATA_AVAILABLE, !m_at_reply_data.empty(), false);
 }
 

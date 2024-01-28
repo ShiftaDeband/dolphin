@@ -180,13 +180,15 @@ bool CEXIModem::TAPServerNetworkInterface::SendFrames()
     size_t size = end_offset - start_offset;
 
     uint8_t size_bytes[2] = {static_cast<u8>(size), static_cast<u8>(size >> 8)};
-    if (send(m_fd, size_bytes, 2, SEND_FLAGS) != 2)
+    char* size_bytes_char = reinterpret_cast<char*>(const_cast<uint8_t*>(size_bytes));
+
+    if (send(m_fd, size_bytes_char, 2, SEND_FLAGS) != 2)
     {
       ERROR_LOG_FMT(SP1, "SendFrames(): could not write size field");
       return false;
     }
     int written_bytes =
-        send(m_fd, m_modem_ref->m_send_buffer.data() + start_offset, size, SEND_FLAGS);
+        send(m_fd, m_modem_ref->m_send_buffer.data() + start_offset, (int)size, SEND_FLAGS);
     if (u32(written_bytes) != size)
     {
       ERROR_LOG_FMT(SP1, "SendFrames(): expected to write {} bytes, instead wrote {}", size,
@@ -294,7 +296,7 @@ void CEXIModem::TAPServerNetworkInterface::ReadThreadHandler()
     case ReadState::SKIP:
     {
       ws_ssize_t bytes_read = recv(m_fd, frame_data.data() + frame_bytes_received,
-                                   frame_data.size() - frame_bytes_received, 0);
+                                   int(frame_data.size()) - int(frame_bytes_received), 0);
       if (bytes_read <= 0)
       {
         ERROR_LOG_FMT(SP1, "Failed to read data from destination: {}",
