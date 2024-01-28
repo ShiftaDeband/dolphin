@@ -371,7 +371,8 @@ void EmuCodeBlock::SafeLoadToReg(X64Reg reg_value, const Gen::OpArg& opAddress, 
   }
 
   FixupBranch exit;
-  const bool dr_set = (flags & SAFE_LOADSTORE_DR_ON) || m_jit.m_ppc_state.msr.DR;
+  const bool dr_set =
+      (flags & SAFE_LOADSTORE_DR_ON) || (m_jit.m_ppc_state.feature_flags & FEATURE_FLAG_MSR_DR);
   const bool fast_check_address =
       !force_slow_access && dr_set && m_jit.jo.fastmem_arena && !m_jit.m_ppc_state.m_enable_dcache;
   if (fast_check_address)
@@ -440,7 +441,7 @@ void EmuCodeBlock::SafeLoadToRegImmediate(X64Reg reg_value, u32 address, int acc
                                           BitSet32 registersInUse, bool signExtend)
 {
   // If the address is known to be RAM, just load it directly.
-  if (m_jit.jo.fastmem_arena && m_jit.m_mmu.IsOptimizableRAMAddress(address))
+  if (m_jit.jo.fastmem_arena && m_jit.m_mmu.IsOptimizableRAMAddress(address, accessSize))
   {
     UnsafeLoadToReg(reg_value, Imm32(address), accessSize, 0, signExtend);
     return;
@@ -544,7 +545,8 @@ void EmuCodeBlock::SafeWriteRegToReg(OpArg reg_value, X64Reg reg_addr, int acces
   }
 
   FixupBranch exit;
-  const bool dr_set = (flags & SAFE_LOADSTORE_DR_ON) || m_jit.m_ppc_state.msr.DR;
+  const bool dr_set =
+      (flags & SAFE_LOADSTORE_DR_ON) || (m_jit.m_ppc_state.feature_flags & FEATURE_FLAG_MSR_DR);
   const bool fast_check_address =
       !force_slow_access && dr_set && m_jit.jo.fastmem_arena && !m_jit.m_ppc_state.m_enable_dcache;
   if (fast_check_address)
@@ -654,7 +656,7 @@ bool EmuCodeBlock::WriteToConstAddress(int accessSize, OpArg arg, u32 address,
     m_jit.js.fifoBytesSinceCheck += accessSize >> 3;
     return false;
   }
-  else if (m_jit.jo.fastmem_arena && m_jit.m_mmu.IsOptimizableRAMAddress(address))
+  else if (m_jit.jo.fastmem_arena && m_jit.m_mmu.IsOptimizableRAMAddress(address, accessSize))
   {
     WriteToConstRamAddress(accessSize, arg, address);
     return false;

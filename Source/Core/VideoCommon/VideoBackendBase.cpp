@@ -93,7 +93,7 @@ std::string VideoBackendBase::BadShaderFilename(const char* shader_stage, int co
 void VideoBackendBase::Video_ExitLoop()
 {
   auto& system = Core::System::GetInstance();
-  system.GetFifo().ExitGpuLoop(system);
+  system.GetFifo().ExitGpuLoop();
 }
 
 // Run from the CPU thread (from VideoInterface.cpp)
@@ -369,7 +369,8 @@ bool VideoBackendBase::InitializeShared(std::unique_ptr<AbstractGfx> gfx,
   if (!g_vertex_manager->Initialize() || !g_shader_cache->Initialize() ||
       !g_perf_query->Initialize() || !g_presenter->Initialize() ||
       !g_framebuffer_manager->Initialize() || !g_texture_cache->Initialize() ||
-      !g_bounding_box->Initialize() || !g_graphics_mod_manager->Initialize())
+      (g_ActiveConfig.backend_info.bSupportsBBox && !g_bounding_box->Initialize()) ||
+      !g_graphics_mod_manager->Initialize())
   {
     PanicAlertFmtT("Failed to initialize renderer classes");
     Shutdown();
@@ -378,9 +379,9 @@ bool VideoBackendBase::InitializeShared(std::unique_ptr<AbstractGfx> gfx,
 
   auto& system = Core::System::GetInstance();
   auto& command_processor = system.GetCommandProcessor();
-  command_processor.Init(system);
-  system.GetFifo().Init(system);
-  system.GetPixelEngine().Init(system);
+  command_processor.Init();
+  system.GetFifo().Init();
+  system.GetPixelEngine().Init();
   BPInit();
   VertexLoaderManager::Init();
   system.GetVertexShaderManager().Init();

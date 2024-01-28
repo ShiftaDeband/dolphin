@@ -53,6 +53,8 @@ enum class CoreMode
 constexpr size_t TLB_SIZE = 128;
 constexpr size_t NUM_TLBS = 2;
 constexpr size_t TLB_WAYS = 2;
+constexpr size_t DATA_TLB_INDEX = 0;
+constexpr size_t INST_TLB_INDEX = 1;
 
 struct TLBEntry
 {
@@ -141,6 +143,8 @@ struct PowerPCState
   UReg_MSR msr;      // machine state register
   UReg_FPSCR fpscr;  // floating point flags/status bits
 
+  CPUEmuFeatureFlags feature_flags;
+
   // Exception management.
   u32 Exceptions = 0;
 
@@ -156,7 +160,7 @@ struct PowerPCState
   // lscbx
   u16 xer_stringctrl = 0;
 
-#if _M_X86_64
+#ifdef _M_X86_64
   // This member exists only for the purpose of an assertion that its offset <= 0x100.
   std::tuple<> above_fits_in_first_0x100;
 
@@ -230,7 +234,7 @@ struct PowerPCState
   void UpdateFPRFSingle(float fvalue);
 };
 
-#if _M_X86_64
+#ifdef _M_X86_64
 #ifdef __GNUC__
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Winvalid-offsetof"
@@ -346,5 +350,8 @@ void CheckBreakPointsFromJIT(PowerPCManager& power_pc);
 #define TU(ppc_state) (ppc_state).spr[SPR_TU]
 
 void RoundingModeUpdated(PowerPCState& ppc_state);
+void MSRUpdated(PowerPCState& ppc_state);
+void MMCRUpdated(PowerPCState& ppc_state);
+void RecalculateAllFeatureFlags(PowerPCState& ppc_state);
 
 }  // namespace PowerPC

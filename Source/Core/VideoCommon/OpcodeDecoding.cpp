@@ -220,7 +220,7 @@ public:
     else
     {
       auto& system = Core::System::GetInstance();
-      system.GetCommandProcessor().HandleUnknownOpcode(system, opcode, data, is_preprocess);
+      system.GetCommandProcessor().HandleUnknownOpcode(opcode, data, is_preprocess);
       m_cycles += 1;
     }
   }
@@ -234,7 +234,7 @@ public:
       // process them.
       if (g_record_fifo_data && static_cast<Opcode>(data[0]) != Opcode::GX_CMD_CALL_DL)
       {
-        FifoRecorder::GetInstance().WriteGPCommand(data, size);
+        Core::System::GetInstance().GetFifoRecorder().WriteGPCommand(data, size);
       }
     }
   }
