@@ -3,9 +3,11 @@
 
 #include "Core/State.h"
 
+#include <algorithm>
 #include <atomic>
 #include <condition_variable>
 #include <filesystem>
+#include <locale>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -14,6 +16,7 @@
 #include <utility>
 #include <vector>
 
+#include <fmt/chrono.h>
 #include <fmt/format.h>
 
 #include <lz4.h>
@@ -30,6 +33,8 @@
 #include "Common/Version.h"
 #include "Common/WorkQueueThread.h"
 
+#include "Core/AchievementManager.h"
+#include "Core/Config/AchievementSettings.h"
 #include "Core/ConfigManager.h"
 #include "Core/Core.h"
 #include "Core/CoreTiming.h"
@@ -92,7 +97,7 @@ static size_t s_state_writes_in_queue;
 static std::condition_variable s_state_write_queue_is_empty;
 
 // Don't forget to increase this after doing changes on the savestate system
-constexpr u32 STATE_VERSION = 163;  // Last changed in PR 12217
+constexpr u32 STATE_VERSION = 167;  // Last changed in PR 12494
 
 // Increase this if the StateExtendedHeader definition changes
 constexpr u32 EXTENDED_HEADER_VERSION = 1;  // Last changed in PR 12217
@@ -168,7 +173,7 @@ static void DoState(PointerWrap& p)
 
   // Movie must be done before the video backend, because the window is redrawn in the video backend
   // state load, and the frame number must be up-to-date.
-  Movie::DoState(p);
+  system.GetMovie().DoState(p);
   p.DoMarker("Movie");
 
   // Begin with video backend, so that it gets a chance to clear its caches and writeback modified
@@ -203,6 +208,14 @@ void LoadFromBuffer(std::vector<u8>& buffer)
     return;
   }
 
+#ifdef USE_RETRO_ACHIEVEMENTS
+  if (AchievementManager::GetInstance().IsHardcoreModeActive())
+  {
+    OSD::AddMessage("Loading savestates is disabled in RetroAchievements hardcore mode");
+    return;
+  }
+#endif  // USE_RETRO_ACHIEVEMENTS
+
   Core::RunOnCPUThread(
       [&] {
         u8* ptr = buffer.data();
@@ -230,21 +243,23 @@ void SaveToBuffer(std::vector<u8>& buffer)
       true);
 }
 
-// return state number not in map
-static int GetEmptySlot(std::map<double, int> m)
+namespace
+{
+struct SlotWithTimestamp
+{
+  int slot;
+  double timestamp;
+};
+}  // namespace
+
+// returns first slot number not in the vector, or -1 if all are in the vector
+static int GetEmptySlot(const std::vector<SlotWithTimestamp>& used_slots)
 {
   for (int i = 1; i <= (int)NUM_STATES; i++)
   {
-    bool found = false;
-    for (auto& p : m)
-    {
-      if (p.second == i)
-      {
-        found = true;
-        break;
-      }
-    }
-    if (!found)
+    const auto it = std::find_if(used_slots.begin(), used_slots.end(),
+                                 [i](const SlotWithTimestamp& slot) { return slot.slot == i; });
+    if (it == used_slots.end())
       return i;
   }
   return -1;
@@ -265,27 +280,19 @@ static double GetSystemTimeAsDouble()
 static std::string SystemTimeAsDoubleToString(double time)
 {
   // revert adjustments from GetSystemTimeAsDouble() to get a normal Unix timestamp again
-  time_t seconds = (time_t)time + DOUBLE_TIME_OFFSET;
-  tm* localTime = localtime(&seconds);
+  const time_t seconds = static_cast<time_t>(time) + DOUBLE_TIME_OFFSET;
+  const tm local_time = fmt::localtime(seconds);
 
-#ifdef _WIN32
-  wchar_t tmp[32] = {};
-  wcsftime(tmp, std::size(tmp), L"%x %X", localTime);
-  return WStringToUTF8(tmp);
-#else
-  char tmp[32] = {};
-  strftime(tmp, sizeof(tmp), "%x %X", localTime);
-  return tmp;
-#endif
+  // fmt is locale agnostic by default, so explicitly use current locale.
+  return fmt::format(std::locale{""}, "{:%x %X}", local_time);
 }
 
 static std::string MakeStateFilename(int number);
 
-// read state timestamps
-static std::map<double, int> GetSavedStates()
+static std::vector<SlotWithTimestamp> GetUsedSlotsWithTimestamp()
 {
+  std::vector<SlotWithTimestamp> result;
   StateHeader header;
-  std::map<double, int> m;
   for (int i = 1; i <= (int)NUM_STATES; i++)
   {
     std::string filename = MakeStateFilename(i);
@@ -293,17 +300,16 @@ static std::map<double, int> GetSavedStates()
     {
       if (ReadHeader(filename, header))
       {
-        double d = GetSystemTimeAsDouble() - header.legacy_header.time;
-
-        // increase time until unique value is obtained
-        while (m.find(d) != m.end())
-          d += .001;
-
-        m.emplace(d, i);
+        result.emplace_back(SlotWithTimestamp{.slot = i, .timestamp = header.legacy_header.time});
       }
     }
   }
-  return m;
+  return result;
+}
+
+static bool CompareTimestamp(const SlotWithTimestamp& lhs, const SlotWithTimestamp& rhs)
+{
+  return lhs.timestamp < rhs.timestamp;
 }
 
 static void CompressBufferToFile(const u8* raw_buffer, u64 size, File::IOFile& f)
@@ -429,9 +435,10 @@ static void CompressAndDumpState(CompressAndDumpState_args& save_args)
       }
     }
 
-    if ((Movie::IsMovieActive()) && !Movie::IsJustStartingRecordingInputFromSaveState())
-      Movie::SaveRecording(dtmname);
-    else if (!Movie::IsMovieActive())
+    auto& movie = Core::System::GetInstance().GetMovie();
+    if ((movie.IsMovieActive()) && !movie.IsJustStartingRecordingInputFromSaveState())
+      movie.SaveRecording(dtmname);
+    else if (!movie.IsMovieActive())
       File::Delete(dtmname);
 
     // Move written state to final location.
@@ -560,7 +567,8 @@ static bool GetVersionFromLZO(StateHeader& header, File::IOFile& f)
   return true;
 }
 
-static bool ReadStateHeaderFromFile(StateHeader& header, File::IOFile& f)
+static bool ReadStateHeaderFromFile(StateHeader& header, File::IOFile& f,
+                                    bool get_version_header = true)
 {
   if (!f.IsOpen())
   {
@@ -573,6 +581,11 @@ static bool ReadStateHeaderFromFile(StateHeader& header, File::IOFile& f)
     Core::DisplayMessage("Failed to read state legacy header", 2000);
     return false;
   }
+
+  // Bail out if we only care for retrieving the legacy header.
+  // This is the case with ReadHeader() calls.
+  if (!get_version_header)
+    return true;
 
   if (header.legacy_header.lzo_size != 0)
   {
@@ -608,7 +621,8 @@ bool ReadHeader(const std::string& filename, StateHeader& header)
   std::lock_guard lk(s_save_thread_mutex);
 
   File::IOFile f(filename, "rb");
-  return ReadStateHeaderFromFile(header, f);
+  bool get_version_header = false;
+  return ReadStateHeaderFromFile(header, f, get_version_header);
 }
 
 std::string GetInfoStringOfSlot(int slot, bool translate)
@@ -831,6 +845,14 @@ void LoadAs(const std::string& filename)
     return;
   }
 
+#ifdef USE_RETRO_ACHIEVEMENTS
+  if (AchievementManager::GetInstance().IsHardcoreModeActive())
+  {
+    OSD::AddMessage("Loading savestates is disabled in RetroAchievements hardcore mode");
+    return;
+  }
+#endif  // USE_RETRO_ACHIEVEMENTS
+
   std::unique_lock lk(s_load_or_save_in_progress_mutex, std::try_to_lock);
   if (!lk)
     return;
@@ -838,13 +860,14 @@ void LoadAs(const std::string& filename)
   Core::RunOnCPUThread(
       [&] {
         // Save temp buffer for undo load state
-        if (!Movie::IsJustStartingRecordingInputFromSaveState())
+        auto& movie = Core::System::GetInstance().GetMovie();
+        if (!movie.IsJustStartingRecordingInputFromSaveState())
         {
           std::lock_guard lk2(s_undo_load_buffer_mutex);
           SaveToBuffer(s_undo_load_buffer);
           const std::string dtmpath = File::GetUserPath(D_STATESAVES_IDX) + "undo.dtm";
-          if (Movie::IsMovieActive())
-            Movie::SaveRecording(dtmpath);
+          if (movie.IsMovieActive())
+            movie.SaveRecording(dtmpath);
           else if (File::Exists(dtmpath))
             File::Delete(dtmpath);
         }
@@ -875,10 +898,10 @@ void LoadAs(const std::string& filename)
             Core::DisplayMessage(
                 fmt::format("Loaded State from {}", tempfilename.filename().string()), 2000);
             if (File::Exists(filename + ".dtm"))
-              Movie::LoadInput(filename + ".dtm");
-            else if (!Movie::IsJustStartingRecordingInputFromSaveState() &&
-                     !Movie::IsJustStartingPlayingInputFromSaveState())
-              Movie::EndPlayInput(false);
+              movie.LoadInput(filename + ".dtm");
+            else if (!movie.IsJustStartingRecordingInputFromSaveState() &&
+                     !movie.IsJustStartingPlayingInputFromSaveState())
+              movie.EndPlayInput(false);
           }
           else
           {
@@ -947,33 +970,37 @@ void Load(int slot)
 
 void LoadLastSaved(int i)
 {
-  std::map<double, int> savedStates = GetSavedStates();
-
-  if (i > (int)savedStates.size())
-    Core::DisplayMessage("State doesn't exist", 2000);
-  else
+  if (i <= 0)
   {
-    std::map<double, int>::iterator it = savedStates.begin();
-    std::advance(it, i - 1);
-    Load(it->second);
+    Core::DisplayMessage("State doesn't exist", 2000);
+    return;
   }
+
+  std::vector<SlotWithTimestamp> used_slots = GetUsedSlotsWithTimestamp();
+  if (static_cast<size_t>(i) > used_slots.size())
+  {
+    Core::DisplayMessage("State doesn't exist", 2000);
+    return;
+  }
+
+  std::stable_sort(used_slots.begin(), used_slots.end(), CompareTimestamp);
+  Load((used_slots.end() - i)->slot);
 }
 
 // must wait for state to be written because it must know if all slots are taken
 void SaveFirstSaved()
 {
-  std::map<double, int> savedStates = GetSavedStates();
-
-  // save to an empty slot
-  if (savedStates.size() < NUM_STATES)
-    Save(GetEmptySlot(savedStates), true);
-  // overwrite the oldest state
-  else
+  std::vector<SlotWithTimestamp> used_slots = GetUsedSlotsWithTimestamp();
+  if (used_slots.size() < NUM_STATES)
   {
-    std::map<double, int>::iterator it = savedStates.begin();
-    std::advance(it, savedStates.size() - 1);
-    Save(it->second, true);
+    // save to an empty slot
+    Save(GetEmptySlot(used_slots), true);
+    return;
   }
+
+  // overwrite the oldest state
+  std::stable_sort(used_slots.begin(), used_slots.end(), CompareTimestamp);
+  Save(used_slots.front().slot, true);
 }
 
 // Load the last state before loading the state
@@ -982,13 +1009,14 @@ void UndoLoadState()
   std::lock_guard lk(s_undo_load_buffer_mutex);
   if (!s_undo_load_buffer.empty())
   {
-    if (Movie::IsMovieActive())
+    auto& movie = Core::System::GetInstance().GetMovie();
+    if (movie.IsMovieActive())
     {
       const std::string dtmpath = File::GetUserPath(D_STATESAVES_IDX) + "undo.dtm";
       if (File::Exists(dtmpath))
       {
         LoadFromBuffer(s_undo_load_buffer);
-        Movie::LoadInput(dtmpath);
+        movie.LoadInput(dtmpath);
       }
       else
       {

@@ -213,9 +213,11 @@ void FifoRecorder::FifoRecordAnalyzer::ProcessVertexComponent(
   m_owner->UseMemory(array_start, array_size, MemoryUpdate::Type::VertexStream);
 }
 
-static FifoRecorder instance;
+FifoRecorder::FifoRecorder(Core::System& system) : m_system(system)
+{
+}
 
-FifoRecorder::FifoRecorder() = default;
+FifoRecorder::~FifoRecorder() = default;
 
 void FifoRecorder::StartRecording(s32 numFrames, CallbackFunc finishedCb)
 {
@@ -235,8 +237,7 @@ void FifoRecorder::StartRecording(s32 numFrames, CallbackFunc finishedCb)
   //   - Global variables suck
   //   - Multithreading with the above two sucks
   //
-  auto& system = Core::System::GetInstance();
-  auto& memory = system.GetMemory();
+  auto& memory = m_system.GetMemory();
   m_Ram.resize(memory.GetRamSize());
   m_ExRam.resize(memory.GetExRamSize());
 
@@ -261,14 +262,18 @@ void FifoRecorder::StartRecording(s32 numFrames, CallbackFunc finishedCb)
         OpcodeDecoder::g_record_fifo_data = IsRecording();
 
         if (!OpcodeDecoder::g_record_fifo_data)
+        {
+          // Remove this frame end callback when recording finishes
+          m_end_of_frame_event.reset();
           return;
+        }
 
         if (!was_recording)
         {
           RecordInitialVideoMemory();
         }
 
-        const auto& fifo = Core::System::GetInstance().GetCommandProcessor().GetFifo();
+        const auto& fifo = m_system.GetCommandProcessor().GetFifo();
         EndFrame(fifo.CPBase.load(std::memory_order_relaxed),
                  fifo.CPEnd.load(std::memory_order_relaxed));
       },
@@ -352,8 +357,7 @@ void FifoRecorder::WriteGPCommand(const u8* data, u32 size)
 
 void FifoRecorder::UseMemory(u32 address, u32 size, MemoryUpdate::Type type, bool dynamicUpdate)
 {
-  auto& system = Core::System::GetInstance();
-  auto& memory = system.GetMemory();
+  auto& memory = m_system.GetMemory();
 
   u8* curData;
   u8* newData;
@@ -430,9 +434,6 @@ void FifoRecorder::EndFrame(u32 fifoStart, u32 fifoEnd)
     m_SkipFutureData = true;
     // Signal video backend that it should not call this function when the next frame ends
     m_IsRecording = false;
-
-    // Remove our frame end callback
-    m_end_of_frame_event.reset();
   }
 }
 
@@ -459,9 +460,4 @@ void FifoRecorder::SetVideoMemory(const u32* bpMem, const u32* cpMem, const u32*
 bool FifoRecorder::IsRecording() const
 {
   return m_IsRecording;
-}
-
-FifoRecorder& FifoRecorder::GetInstance()
-{
-  return instance;
 }

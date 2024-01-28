@@ -12,6 +12,7 @@
 #include "Common/EnumMap.h"
 #include "Common/Logging/Log.h"
 #include "Common/MathUtil.h"
+#include "Common/SmallVector.h"
 
 #include "Core/ConfigManager.h"
 #include "Core/DolphinAnalytics.h"
@@ -42,6 +43,7 @@
 #include "VideoCommon/VideoCommon.h"
 #include "VideoCommon/VideoConfig.h"
 #include "VideoCommon/XFMemory.h"
+#include "VideoCommon/XFStateManager.h"
 
 std::unique_ptr<VertexManagerBase> g_vertex_manager;
 
@@ -90,8 +92,9 @@ static bool IsAnamorphicProjection(const Projection::Raw& projection, const View
                                    const VideoConfig& config)
 {
   // If ratio between our projection and viewport aspect ratios is similar to 16:9 / 4:3
-  // we have an anamorphic projection. This value can be overridden
-  // by a GameINI.
+  // we have an anamorphic projection. This value can be overridden by a GameINI.
+  // Game cheats that change the aspect ratio to natively unsupported ones
+  // won't be automatically recognized here.
 
   return std::abs(CalculateProjectionViewportRatio(projection, viewport) -
                   config.widescreen_heuristic_widescreen_ratio) <
@@ -539,11 +542,12 @@ void VertexManagerBase::Flush()
   auto& pixel_shader_manager = system.GetPixelShaderManager();
   auto& geometry_shader_manager = system.GetGeometryShaderManager();
   auto& vertex_shader_manager = system.GetVertexShaderManager();
+  auto& xf_state_manager = system.GetXFStateManager();
 
   if (g_ActiveConfig.bGraphicMods)
   {
     const double seconds_elapsed =
-        static_cast<double>(m_ticks_elapsed) / SystemTimers::GetTicksPerSecond();
+        static_cast<double>(m_ticks_elapsed) / system.GetSystemTimers().GetTicksPerSecond();
     pixel_shader_manager.constants.time_ms = seconds_elapsed * 1000;
   }
 
@@ -551,7 +555,7 @@ void VertexManagerBase::Flush()
   // Calculate ZSlope for zfreeze
   const auto used_textures = UsedTextures();
   std::vector<std::string> texture_names;
-  std::vector<u32> texture_units;
+  Common::SmallVector<u32, 8> texture_units;
   if (!m_cull_all)
   {
     if (!g_ActiveConfig.bGraphicMods)
@@ -578,7 +582,7 @@ void VertexManagerBase::Flush()
       }
     }
   }
-  vertex_shader_manager.SetConstants(texture_names);
+  vertex_shader_manager.SetConstants(texture_names, xf_state_manager);
   if (!bpmem.genMode.zfreeze)
   {
     // Must be done after VertexShaderManager::SetConstants()
@@ -595,19 +599,19 @@ void VertexManagerBase::Flush()
     CustomPixelShaderContents custom_pixel_shader_contents;
     std::optional<CustomPixelShader> custom_pixel_shader;
     std::vector<std::string> custom_pixel_texture_names;
-    for (int i = 0; i < texture_names.size(); i++)
+    std::span<u8> custom_pixel_shader_uniforms;
+    bool skip = false;
+    for (size_t i = 0; i < texture_names.size(); i++)
     {
-      const std::string& texture_name = texture_names[i];
-      const u32 texture_unit = texture_units[i];
-      bool skip = false;
-      GraphicsModActionData::DrawStarted draw_started{texture_unit, &skip, &custom_pixel_shader};
-      for (const auto& action : g_graphics_mod_manager->GetDrawStartedActions(texture_name))
+      GraphicsModActionData::DrawStarted draw_started{texture_units, &skip, &custom_pixel_shader,
+                                                      &custom_pixel_shader_uniforms};
+      for (const auto& action : g_graphics_mod_manager->GetDrawStartedActions(texture_names[i]))
       {
         action->OnDrawStarted(&draw_started);
         if (custom_pixel_shader)
         {
           custom_pixel_shader_contents.shaders.push_back(*custom_pixel_shader);
-          custom_pixel_texture_names.push_back(texture_name);
+          custom_pixel_texture_names.push_back(texture_names[i]);
         }
         custom_pixel_shader = std::nullopt;
       }
@@ -644,6 +648,12 @@ void VertexManagerBase::Flush()
     // Now we can upload uniforms, as nothing else will override them.
     geometry_shader_manager.SetConstants(m_current_primitive_type);
     pixel_shader_manager.SetConstants();
+    if (!custom_pixel_shader_uniforms.empty() &&
+        pixel_shader_manager.custom_constants.data() != custom_pixel_shader_uniforms.data())
+    {
+      pixel_shader_manager.custom_constants_dirty = true;
+    }
+    pixel_shader_manager.custom_constants = custom_pixel_shader_uniforms;
     UploadUniforms();
 
     // Update the pipeline, or compile one if needed.
@@ -1052,7 +1062,8 @@ void VertexManagerBase::OnEndFrame()
     return;
 
   // In order to reduce CPU readback latency, we want to kick a command buffer roughly halfway
-  // between the draw counters that invoked the readback, or every 250 draws, whichever is smaller.
+  // between the draw counters that invoked the readback, or every 250 draws, whichever is
+  // smaller.
   if (g_ActiveConfig.iCommandBufferExecuteInterval > 0)
   {
     u32 last_draw_counter = 0;

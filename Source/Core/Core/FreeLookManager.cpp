@@ -118,6 +118,11 @@ std::string FreeLookController::GetName() const
   return std::string("FreeLook") + char('1' + m_index);
 }
 
+InputConfig* FreeLookController::GetConfig() const
+{
+  return FreeLook::GetInputConfig();
+}
+
 void FreeLookController::LoadDefaults(const ControllerInterface& ciface)
 {
   EmulatedController::LoadDefaults(ciface);
@@ -155,7 +160,7 @@ void FreeLookController::LoadDefaults(const ControllerInterface& ciface)
                                         "if(`Click 3`,`RelativeMouse Y-` * 0.10, 0)");
   m_rotation_gyro->SetControlExpression(GyroButtons::PitchDown,
                                         "if(`Click 3`,`RelativeMouse Y+` * 0.10, 0)");
-#elif __APPLE__
+#elif defined(__APPLE__)
   m_rotation_gyro->SetControlExpression(GyroButtons::PitchUp,
                                         "if(`Left Click`,`RelativeMouse Y-` * 0.10, 0)");
   m_rotation_gyro->SetControlExpression(GyroButtons::PitchDown,
@@ -186,7 +191,7 @@ void FreeLookController::LoadDefaults(const ControllerInterface& ciface)
                                         "if(`Click 3`,`RelativeMouse X-` * 0.10, 0)");
   m_rotation_gyro->SetControlExpression(GyroButtons::YawRight,
                                         "if(`Click 3`,`RelativeMouse X+` * 0.10, 0)");
-#elif __APPLE__
+#elif defined(__APPLE__)
   m_rotation_gyro->SetControlExpression(GyroButtons::YawLeft,
                                         "if(`Right Click`,`RelativeMouse X-` * 0.10, 0)");
   m_rotation_gyro->SetControlExpression(GyroButtons::YawRight,
