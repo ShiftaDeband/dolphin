@@ -933,7 +933,7 @@
     <ClCompile Include="Core\HW\EXI\BBA\TAP_Win32.cpp" />
     <ClCompile Include="Core\HW\EXI\BBA\TAPServer.cpp" />
     <ClCompile Include="Core\HW\EXI\BBA\XLINK_KAI_BBA.cpp" />
-    <ClCompile Include="Core\HW\EXI\Modem\TAPServer.cpp" />
+    <ClCompile Include="Core\HW\EXI\Modem\Modem_TAPServer.cpp" />
     <ClCompile Include="Core\HW\EXI\EXI_Channel.cpp" />
     <ClCompile Include="Core\HW\EXI\EXI_Device.cpp" />
     <ClCompile Include="Core\HW\EXI\EXI_DeviceAD16.cpp" />
